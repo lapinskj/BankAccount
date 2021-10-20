@@ -9,7 +9,7 @@ import (
 	conf "BankAccount/configuration"
 )
 
-func main () {
+func main() {
 	fName := "main.main"
 
 	configPath := "config.json"

@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"sort"
 	"sync"
 	"time"
 
@@ -112,28 +111,14 @@ type Session struct {
 func Open(dialector Dialector, opts ...Option) (db *DB, err error) {
 	config := &Config{}
 
-	sort.Slice(opts, func(i, j int) bool {
-		_, isConfig := opts[i].(*Config)
-		_, isConfig2 := opts[j].(*Config)
-		return isConfig && !isConfig2
-	})
-
 	for _, opt := range opts {
 		if opt != nil {
 			if err := opt.Apply(config); err != nil {
 				return nil, err
 			}
-			defer func(opt Option) {
-				if errr := opt.AfterInitialize(db); errr != nil {
-					err = errr
-				}
-			}(opt)
-		}
-	}
-
-	if d, ok := dialector.(interface{ Apply(*Config) error }); ok {
-		if err = d.Apply(config); err != nil {
-			return
+			defer func() {
+				opt.AfterInitialize(db)
+			}()
 		}
 	}
 
@@ -340,20 +325,20 @@ func (db *DB) AddError(err error) error {
 func (db *DB) DB() (*sql.DB, error) {
 	connPool := db.ConnPool
 
-	if dbConnector, ok := connPool.(GetDBConnector); ok && dbConnector != nil {
-		return dbConnector.GetDBConn()
+	if stmtDB, ok := connPool.(*PreparedStmtDB); ok {
+		connPool = stmtDB.ConnPool
 	}
 
 	if sqldb, ok := connPool.(*sql.DB); ok {
 		return sqldb, nil
 	}
 
-	return nil, ErrInvalidDB
+	return nil, ErrInvaildDB
 }
 
 func (db *DB) getInstance() *DB {
 	if db.clone > 0 {
-		tx := &DB{Config: db.Config, Error: db.Error}
+		tx := &DB{Config: db.Config}
 
 		if db.clone == 1 {
 			// clone with new statement
@@ -409,7 +394,7 @@ func (db *DB) SetupJoinTable(model interface{}, field string, joinTable interfac
 				}
 				ref.ForeignKey = f
 			} else {
-				return fmt.Errorf("missing field %s for join table", ref.ForeignKey.DBName)
+				return fmt.Errorf("missing field %v for join table", ref.ForeignKey.DBName)
 			}
 		}
 
@@ -422,7 +407,7 @@ func (db *DB) SetupJoinTable(model interface{}, field string, joinTable interfac
 
 		relation.JoinTable = joinSchema
 	} else {
-		return fmt.Errorf("failed to found relation: %s", field)
+		return fmt.Errorf("failed to found relation: %v", field)
 	}
 
 	return nil

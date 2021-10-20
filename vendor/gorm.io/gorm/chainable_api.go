@@ -50,14 +50,15 @@ func (db *DB) Table(name string, args ...interface{}) (tx *DB) {
 		tx.Statement.TableExpr = &clause.Expr{SQL: name, Vars: args}
 		if results := tableRegexp.FindStringSubmatch(name); len(results) == 2 {
 			tx.Statement.Table = results[1]
+			return
 		}
 	} else if tables := strings.Split(name, "."); len(tables) == 2 {
 		tx.Statement.TableExpr = &clause.Expr{SQL: tx.Statement.Quote(name)}
 		tx.Statement.Table = tables[1]
-	} else {
-		tx.Statement.TableExpr = &clause.Expr{SQL: tx.Statement.Quote(name)}
-		tx.Statement.Table = name
+		return
 	}
+
+	tx.Statement.Table = name
 	return
 }
 
@@ -102,7 +103,7 @@ func (db *DB) Select(query interface{}, args ...interface{}) (tx *DB) {
 				Distinct:   db.Statement.Distinct,
 				Expression: clause.NamedExpr{SQL: v, Vars: args},
 			})
-		} else {
+		}  else {
 			tx.Statement.Selects = []string{v}
 
 			for _, arg := range args {
@@ -171,19 +172,8 @@ func (db *DB) Or(query interface{}, args ...interface{}) (tx *DB) {
 // Joins specify Joins conditions
 //     db.Joins("Account").Find(&user)
 //     db.Joins("JOIN emails ON emails.user_id = users.id AND emails.email = ?", "jinzhu@example.org").Find(&user)
-//     db.Joins("Account", DB.Select("id").Where("user_id = users.id AND name = ?", "someName").Model(&Account{}))
 func (db *DB) Joins(query string, args ...interface{}) (tx *DB) {
 	tx = db.getInstance()
-
-	if len(args) > 0 {
-		if db, ok := args[0].(*DB); ok {
-			if where, ok := db.Statement.Clauses["WHERE"].Expression.(clause.Where); ok {
-				tx.Statement.Joins = append(tx.Statement.Joins, join{Name: query, Conds: args[1:], On: &where})
-			}
-			return
-		}
-	}
-
 	tx.Statement.Joins = append(tx.Statement.Joins, join{Name: query, Conds: args})
 	return
 }
@@ -219,14 +209,12 @@ func (db *DB) Order(value interface{}) (tx *DB) {
 		tx.Statement.AddClause(clause.OrderBy{
 			Columns: []clause.OrderByColumn{v},
 		})
-	case string:
-		if v != "" {
-			tx.Statement.AddClause(clause.OrderBy{
-				Columns: []clause.OrderByColumn{{
-					Column: clause.Column{Name: v, Raw: true},
-				}},
-			})
-		}
+	default:
+		tx.Statement.AddClause(clause.OrderBy{
+			Columns: []clause.OrderByColumn{{
+				Column: clause.Column{Name: fmt.Sprint(value), Raw: true},
+			}},
+		})
 	}
 	return
 }

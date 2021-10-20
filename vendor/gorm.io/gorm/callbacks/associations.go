@@ -288,13 +288,12 @@ func SaveAfterAssociations(create bool) func(db *gorm.DB) {
 					appendToElems(db.Statement.ReflectValue)
 				}
 
-				// optimize elems of reflect value length
-				if elemLen := elems.Len(); elemLen > 0 {
+				if elems.Len() > 0 {
 					if v, ok := selectColumns[rel.Name+".*"]; !ok || v {
 						saveAssociations(db, rel, elems.Interface(), selectColumns, restricted, nil)
 					}
 
-					for i := 0; i < elemLen; i++ {
+					for i := 0; i < elems.Len(); i++ {
 						appendToJoins(objs[i], elems.Index(i))
 					}
 				}
@@ -310,22 +309,33 @@ func SaveAfterAssociations(create bool) func(db *gorm.DB) {
 	}
 }
 
-func onConflictOption(stmt *gorm.Statement, s *schema.Schema, selectColumns map[string]bool, restricted bool, defaultUpdatingColumns []string) (onConflict clause.OnConflict) {
-	if len(defaultUpdatingColumns) > 0 || stmt.DB.FullSaveAssociations {
-		onConflict.Columns = make([]clause.Column, 0, len(s.PrimaryFieldDBNames))
-		for _, dbName := range s.PrimaryFieldDBNames {
-			onConflict.Columns = append(onConflict.Columns, clause.Column{Name: dbName})
-		}
+func onConflictOption(stmt *gorm.Statement, s *schema.Schema, selectColumns map[string]bool, restricted bool, defaultUpdatingColumns []string) clause.OnConflict {
+	if stmt.DB.FullSaveAssociations {
+		defaultUpdatingColumns = make([]string, 0, len(s.DBNames))
+		for _, dbName := range s.DBNames {
+			if v, ok := selectColumns[dbName]; (ok && !v) || (!ok && restricted) {
+				continue
+			}
 
-		onConflict.UpdateAll = stmt.DB.FullSaveAssociations
-		if !onConflict.UpdateAll {
-			onConflict.DoUpdates = clause.AssignmentColumns(defaultUpdatingColumns)
+			if !s.LookUpField(dbName).PrimaryKey {
+				defaultUpdatingColumns = append(defaultUpdatingColumns, dbName)
+			}
 		}
-	} else {
-		onConflict.DoNothing = true
 	}
 
-	return
+	if len(defaultUpdatingColumns) > 0 {
+		columns := make([]clause.Column, 0, len(s.PrimaryFieldDBNames))
+		for _, dbName := range s.PrimaryFieldDBNames {
+			columns = append(columns, clause.Column{Name: dbName})
+		}
+
+		return clause.OnConflict{
+			Columns:   columns,
+			DoUpdates: clause.AssignmentColumns(defaultUpdatingColumns),
+		}
+	}
+
+	return clause.OnConflict{DoNothing: true}
 }
 
 func saveAssociations(db *gorm.DB, rel *schema.Relationship, values interface{}, selectColumns map[string]bool, restricted bool, defaultUpdatingColumns []string) error {
@@ -362,12 +372,12 @@ func saveAssociations(db *gorm.DB, rel *schema.Relationship, values interface{},
 	})
 
 	if tx.Statement.FullSaveAssociations {
-		tx = tx.Set("gorm:update_track_time", true)
+		tx = tx.InstanceSet("gorm:update_track_time", true)
 	}
 
 	if len(selects) > 0 {
 		tx = tx.Select(selects)
-	} else if restricted && len(omits) == 0 {
+	} else if len(selectColumns) > 0 && len(omits) == 0 {
 		tx = tx.Omit(clause.Associations)
 	}
 

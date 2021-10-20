@@ -57,7 +57,3 @@ type TxCommitter interface {
 type Valuer interface {
 	GormValue(context.Context, *DB) clause.Expr
 }
-
-type GetDBConnector interface {
-	GetDBConn() (*sql.DB, error)
-}
